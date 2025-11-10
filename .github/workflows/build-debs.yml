@@ -43,16 +43,15 @@ jobs:
           start_line=$((line_num + 2))
           echo "Extracting tar.gz data starting from line $start_line"
 
-          # Extract the binary tar.gz data and save it
-          tail -n +$start_line ArrayFire-installer.sh | gunzip > arrayfire.tar
+          # Extract the binary tar.gz data directly to tar and extract immediately
+          # This avoids keeping intermediate files around
+          tail -n +$start_line ArrayFire-installer.sh | gunzip | tar -x
 
-          # Extract the tar file
-          tar -xf arrayfire.tar
-
-          # Clean up
-          rm -f arrayfire.tar
+          # Clean up - delete large installer file immediately
+          rm -f ArrayFire-installer.sh
 
           echo "Extraction completed successfully"
+          df -h
           ls -la | head -20
 
       - name: Verify extraction
@@ -61,6 +60,14 @@ jobs:
             echo "Extraction failed: expected lib64/include/share/ArrayFire to exist" >&2
             exit 2
           fi
+
+      - name: Clean up cache and temporary files
+        run: |
+          # Free up disk space before building
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo apt-get autoremove -y
+          df -h
 
       - name: Make packaging script executable
         run: chmod +x packaging/make_deb.sh
@@ -73,7 +80,16 @@ jobs:
           for f in "${FLAVORS[@]}"; do
             echo "Building flavor: $f"
             ./make_deb.sh "$f" || echo "make_deb.sh failed for $f" && true
+
+            # Clean up debbuild directory after each package to save space
+            rm -rf debbuild/arrayfire-${f}_*
           done
+
+      - name: Clean up extracted files to save space
+        run: |
+          # Remove extracted lib64, include, share folders to free up space
+          rm -rf lib64 include share etc
+          df -h
 
       - name: Upload produced .deb artifacts
         uses: actions/upload-artifact@v4
