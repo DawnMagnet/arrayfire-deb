@@ -30,9 +30,12 @@ if [[ -z "${VERSION_ARG}" ]]; then
 fi
 
 PACKAGE_NAME="arrayfire-${TYPE}"
-PKG_DIR="${SCRIPT_DIR}/debbuild/${PACKAGE_NAME}_${VERSION_ARG}_${ARCH}"
+# Use DEBBUILD_DIR if set (e.g., for large disk), otherwise use script directory
+DEBBUILD_BASE="${DEBBUILD_DIR:-${SCRIPT_DIR}/debbuild}"
+PKG_DIR="${DEBBUILD_BASE}/${PACKAGE_NAME}_${VERSION_ARG}_${ARCH}"
 
 echo "Building package: ${PACKAGE_NAME} version ${VERSION_ARG} arch ${ARCH}"
+echo "Using build directory: ${DEBBUILD_BASE}"
 
 rm -rf "${PKG_DIR}"
 mkdir -p "${PKG_DIR}/DEBIAN"
@@ -188,11 +191,12 @@ if [[ -d "${PKG_DIR}/usr" ]]; then
   find "${PKG_DIR}/usr/lib" -type f -name "*.so*" -exec chmod 0755 {} + || true
 fi
 
-OUT_DEB="${SCRIPT_DIR}/${PACKAGE_NAME}_${VERSION_ARG}_${ARCH}.deb"
+OUT_DEB="${DEBBUILD_BASE}/../${PACKAGE_NAME}_${VERSION_ARG}_${ARCH}.deb"
 echo "Building ${OUT_DEB} ..."
 # Use --root-owner-group so archive members are recorded as owned by root:root
 # This avoids a warning when building as an unprivileged user (rootless build)
-dpkg-deb --build --root-owner-group "${PKG_DIR}" "${OUT_DEB}"
+# Use -Zzstd for zstd compression to reduce package size and build time
+dpkg-deb -Zzstd --build --root-owner-group "${PKG_DIR}" "${OUT_DEB}"
 
 echo "Package built: ${OUT_DEB}"
 

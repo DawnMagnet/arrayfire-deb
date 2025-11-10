@@ -9,9 +9,21 @@ jobs:
   build-debs:
     runs-on: ubuntu-latest
     permissions: write-all
+    env:
+      # Use /mnt for download and build artifacts to save space on root filesystem
+      WORK_DIR: /mnt/arrayfire-build
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup work directory
+        run: |
+          # Create and use /mnt for building to avoid space issues on root filesystem
+          sudo mkdir -p ${{ env.WORK_DIR }}
+          sudo chown $USER:$USER ${{ env.WORK_DIR }}
+          cd ${{ env.WORK_DIR }}
+          pwd
+          df -h ${{ env.WORK_DIR }}
 
       - name: Install packaging tools
         run: |
@@ -21,13 +33,16 @@ jobs:
 
       - name: Download ArrayFire installer
         run: |
+          cd ${{ env.WORK_DIR }}
           URL=https://arrayfire.s3.amazonaws.com/3.10.0/ArrayFire-v3.10.0_Linux_x86_64.sh
           aria2c "$URL" -o ArrayFire-installer.sh
           chmod +x ArrayFire-installer.sh
+          df -h .
 
       - name: Extract tar.gz from ArrayFire installer
         run: |
           set -euo pipefail
+          cd ${{ env.WORK_DIR }}
 
           # Find the line number of "Start of TAR.GZ file" using -a flag for binary files
           line_num=$(grep -a -n "Start of TAR.GZ file" ArrayFire-installer.sh | cut -d: -f1)
@@ -54,6 +69,13 @@ jobs:
           df -h
           ls -la | head -20
 
+      - name: Copy extracted files to workspace
+        run: |
+          cd ${{ env.WORK_DIR }}
+          # Copy extracted files to workspace for packaging
+          cp -r lib64 include share etc ${{ github.workspace }}/
+          ls -la ${{ github.workspace }} | head -20
+
       - name: Verify extraction
         run: |
           if [[ ! -d lib64 && ! -d share/ArrayFire && ! -d include ]]; then
@@ -67,6 +89,8 @@ jobs:
           sudo apt-get clean
           sudo apt-get autoclean
           sudo apt-get autoremove -y
+          # Clean work directory
+          rm -rf ${{ env.WORK_DIR }}/*
           df -h
 
       - name: Make packaging script executable
@@ -75,20 +99,31 @@ jobs:
       - name: Build .deb packages
         run: |
           set -euo pipefail
+
+          # Create build directory in /mnt for faster builds and more space
+          mkdir -p ${{ env.WORK_DIR }}/debbuild
+          export DEBBUILD_DIR="${{ env.WORK_DIR }}/debbuild"
+
           cd packaging
           FLAVORS=(cpu cuda opencl oneapi full)
           for f in "${FLAVORS[@]}"; do
             echo "Building flavor: $f"
-            ./make_deb.sh "$f" || echo "make_deb.sh failed for $f" && true
+            DEBBUILD_DIR="${DEBBUILD_DIR}" ./make_deb.sh "$f" || echo "make_deb.sh failed for $f" && true
 
             # Clean up debbuild directory after each package to save space
-            rm -rf debbuild/arrayfire-${f}_*
+            rm -rf "${DEBBUILD_DIR}/arrayfire-${f}_*"
+            df -h ${{ env.WORK_DIR }}
           done
+
+          # Copy final .deb files to packaging directory
+          cp ${{ env.WORK_DIR }}/debbuild/../*.deb . || true
 
       - name: Clean up extracted files to save space
         run: |
           # Remove extracted lib64, include, share folders to free up space
           rm -rf lib64 include share etc
+          # Clean work directory
+          sudo rm -rf ${{ env.WORK_DIR }}
           df -h
 
       - name: Upload produced .deb artifacts
