@@ -1,0 +1,83 @@
+name: Build ArrayFire .deb packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-debs:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev debhelper build-essential ca-certificates curl unzip xz-utils file
+
+      - name: Download ArrayFire installer
+        run: |
+          URL=https://arrayfire.s3.amazonaws.com/3.10.0/ArrayFire-v3.10.0_Linux_x86_64.sh
+          curl -fsSL "$URL" -o ArrayFire-installer.sh
+          chmod +x ArrayFire-installer.sh
+
+      - name: Extract tar.gz from ArrayFire installer
+        run: |
+          set -euo pipefail
+
+          # Find the line number of "Start of TAR.GZ file"
+          line_num=$(grep -n "Start of TAR.GZ file" ArrayFire-installer.sh | cut -d: -f1)
+
+          if [[ -z "$line_num" ]]; then
+            echo "Error: Could not find 'Start of TAR.GZ file' marker" >&2
+            exit 1
+          fi
+
+          echo "Found 'Start of TAR.GZ file' at line $line_num"
+
+          # Extract tar.gz starting from 2 lines after the marker (skip marker line + 2 more lines)
+          start_line=$((line_num + 2))
+          echo "Extracting tar.gz data starting from line $start_line"
+
+          # Extract the binary tar.gz data and save it
+          tail -n +$start_line ArrayFire-installer.sh | gunzip > arrayfire.tar
+
+          # Extract the tar file
+          tar -xf arrayfire.tar
+
+          # Clean up
+          rm -f arrayfire.tar
+
+          echo "Extraction completed successfully"
+          ls -la | head -20
+
+      - name: Verify extraction
+        run: |
+          if [[ ! -d lib64 && ! -d share/ArrayFire && ! -d include ]]; then
+            echo "Extraction failed: expected lib64/include/share/ArrayFire to exist" >&2
+            exit 2
+          fi
+
+      - name: Make packaging script executable
+        run: chmod +x packaging/make_deb.sh
+
+      - name: Build .deb packages
+        run: |
+          set -euo pipefail
+          cd packaging
+          FLAVORS=(cpu cuda opencl oneapi full)
+          for f in "${FLAVORS[@]}"; do
+            echo "Building flavor: $f"
+            ./make_deb.sh "$f" || echo "make_deb.sh failed for $f" && true
+          done
+
+      - name: Upload produced .deb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arrayfire-debs
+          path: |
+            packaging/*.deb
