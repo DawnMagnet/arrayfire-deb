@@ -29,8 +29,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Find the line number of "Start of TAR.GZ file"
-          line_num=$(grep -n "Start of TAR.GZ file" ArrayFire-installer.sh | cut -d: -f1)
+          # Find the line number of "Start of TAR.GZ file" using -a flag for binary files
+          line_num=$(grep -a -n "Start of TAR.GZ file" ArrayFire-installer.sh | cut -d: -f1)
 
           if [[ -z "$line_num" ]]; then
             echo "Error: Could not find 'Start of TAR.GZ file' marker" >&2
